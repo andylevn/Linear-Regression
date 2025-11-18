@@ -1,0 +1,95 @@
+SELECT COUNT(*)
+FROM `project-leducthinh-2024.DA04_K300.cubic_zirconia` LIMIT 1000
+
+
+SELECT *
+FROM `project-leducthinh-2024.DA04_K300.cubic_zirconia` LIMIT 3
+
+
+SELECT COUNT(*)
+FROM `project-leducthinh-2024.DA04_K300.cubic_zirconia` 
+
+WHERE price IS NOT NULL
+AND x >0
+AND y>0
+AND z>0
+
+
+-- XÂY MODEL
+CREATE OR REPLACE MODEL `project-leducthinh-2024.DA04_K300.gemstone_s6500_linear_model`
+OPTIONS(MODEL_TYPE = 'LINEAR_REG',
+        INPUT_LABEL_COLS =['price'])
+AS
+SELECT * EXCEPT(depth, int64_field_0) -- Bỏ hai cột 
+FROM `project-leducthinh-2024.DA04_K300.cubic_zirconia` 
+WHERE price IS NOT NULL
+AND x >0
+AND y>0
+AND z>0
+
+
+-- TEST LẤN 1:
+-- Mean absolute error 746.6386
+-- Mean squared error 1,267,763.9052
+-- Mean squared log error 0.2367
+-- Median absolute error537.3241
+-- R squared 0.9192
+
+
+
+--EVALUATE
+SELECT *
+FROM ML.EVALUATE(MODEL `project-leducthinh-2024.DA04_K300.gemstone_s6500_linear_model`),
+(SELECT 
+  AVG(price) AS mean_price,
+  STDDEV(price) AS std_price
+FROM `project-leducthinh-2024.DA04_K300.cubic_zirconia` 
+WHERE price IS NOT NULL
+AND price <= 6500 
+AND x>0
+AND y>0
+AND z>0
+)
+
+
+ -- TEST LẦN 2 
+  -- "mean_absolute_error": "746.63858206873124",
+  -- "mean_squared_error": "1267763.9051753615",
+  -- "mean_squared_log_error": "0.23671343910038556",
+  -- "median_absolute_error": "537.32406647937023",
+  -- "r2_score": "0.91920575521373338",
+  -- "explained_variance": "0.91924200354793406",
+
+  -- "mean_price": "2275.768633397654",
+  -- "std_price": "1699.4681604286372"
+
+
+
+-- PREDICT . ĐƯA VÀO NHU CẦU
+SELECT *
+FROM ML.PREDICT(MODEL `project-leducthinh-2024.DA04_K300.gemstone_s6500_linear_model`, (  
+  SELECT 
+  1.5 as carat,
+  'Fair' as cut,
+  'G' as color,
+  'VS2' as clarity,
+  54 as table,
+  7.2 as x,
+  7.1 as y,
+  4.7 as z
+  )
+)
+
+
+-- ML BÁO GIÁ
+  -- "predicted_price": "9936.4918246661546",
+  -- "carat": "1.5",
+  -- "cut": "Fair",
+  -- "color": "G",
+  -- "clarity": "VS2",
+  -- "table": "54",
+  -- "x": "7.2",
+  -- "y": "7.1",
+  -- "z": "4.7"
+
+
