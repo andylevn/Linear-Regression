@@ -1,0 +1,137 @@
+
+-- DÀN KHUNG LINEAR MODEL LÀ TEST 2 LẦN.
+
+SELECT COUNT(*) FROM `project-leducthinh-2024.DA04_K300.weather` LIMIT 3
+
+
+-- Nếu COUNT dưới 500 rows >>> chia 2 phần >>> 80%: train, 20%: test
+-- Nếu trên 10k rows >>> ML tự chia
+-- Nếu trên >10k rows >>> chia ra test 2 lần >> 1 lần train, 1 lần từ dữ liệu để dành. Hoặc không chia cũng được. 
+
+
+
+SELECT * FROM `project-leducthinh-2024.DA04_K300.weather` LIMIT 3
+
+
+
+-- Bảng weather_new sẽ chứa:
+-- Toàn bộ các cột từ bảng gốc weather.
+-- Một cột mới (split_field): Giá trị ngẫu nhiên từ 0 đến 1.
+-- Một cột mới (split_dataframe): Phân loại bản ghi thành 'training' (80%) và 'evaluation' (20%).
+
+CREATE OR REPLACE TABLE `project-leducthinh-2024.DA04_K300.weather_new`
+AS
+SELECT *,
+  CASE
+    WHEN split_field <=0.8 THEN 'training'
+    WHEN split_field >0.8 THEN 'evaluation'
+  END AS split_dataframe
+FROM (
+  SELECT * ,ROUND(ABS(RAND()),3) AS split_field
+  FROM `project-leducthinh-2024.DA04_K300.weather`
+)
+
+-- Xem bảng mới
+SELECT * FROM `project-leducthinh-2024.DA04_K300.weather_new`
+
+
+-- Xem bn record để biết bn dùng dể train , bn dùng test ?
+SELECT split_dataframe,
+COUNT(split_field) as record
+FROM  `project-leducthinh-2024.DA04_K300.weather_new`
+GROUP BY split_dataframe
+
+
+
+-- XÂY MODEL
+CREATE OR REPLACE MODEL `project-leducthinh-2024.DA04_K300.weather_linear_model`
+OPTIONS(MODEL_TYPE = 'LINEAR_REG',
+        INPUT_LABEL_COLS =['Temperature_c'])
+AS
+SELECT * EXCEPT(split_dataframe, split_field) -- Bỏ hai cột split_dataframe và split_field.
+FROM `project-leducthinh-2024.DA04_K300.weather_new` 
+WHERE Temperature_c IS NOT NULL -- Loại bỏ các bản ghi có giá trị NULL trong cột Temperature_c.
+AND split_dataframe LIKE 'training' -- Chỉ sử dụng các bản ghi được gắn nhãn 'training' trong cột split_dataframe.
+  
+
+-- KẾT QUẢ TEST LẦN 1:
+  -- Mean absolute error 2.9145
+  -- Mean squared error 12.8936
+  -- Mean squared log error 0.1103
+  -- Median absolute error 2.6067
+  -- R squared 0.8689
+
+
+
+-- EVALUATE
+SELECT *
+FROM ML.EVALUATE(MODEL `project-leducthinh-2024.DA04_K300.weather_linear_model`,
+
+(SELECT * EXCEPT(split_dataframe, split_field) 
+FROM `project-leducthinh-2024.DA04_K300.weather_new`
+WHERE Temperature_c IS NOT NULL
+AND split_dataframe LIKE 'evaluation') -- Chỉ sử dụng các bản ghi 'evaluation' (20% dữ liệu) từ tập dữ liệu weather_new.
+)
+ 
+
+-- Một số chỉ số quan trọng thường gặp trong Linear Regression:
+-- mean_absolute_error (MAE): Trung bình giá trị tuyệt đối của chênh lệch giữa giá trị thực tế và giá trị dự đoán.
+-- mean_squared_error (MSE): Trung bình bình phương sai số giữa giá trị thực tế và giá trị dự đoán.
+-- r2_score (R-squared): Đo lường mức độ mà mô hình giải thích được sự biến thiên của dữ liệu thực tế. Giá trị gần 1.0 là tốt, thể hiện mô hình phù hợp với dữ liệu.
+
+
+-- KẾT QUẢ TEST LẦN 2
+  -- "mean_absolute_error": "2.8123766174524878",
+  -- "mean_squared_error": "11.944748647668009",
+  -- "mean_squared_log_error": "0.11300126936093284",
+  -- "median_absolute_error": "2.43575841723003",
+  -- "r2_score": "0.86316337200341753",
+  -- "explained_variance": "0.86317613017660533"
+
+
+
+-- SAU 2 LẦN TEST, Thấy KQ CẢ 2 ĐỀU TƯƠNG TỰ >>> ỔN ĐỊNH
+
+
+-- TÍNH ĐỘ LỆCH CHUẨN
+SELECT
+  AVG(Temperature_c) AS mean,
+  STDDEV(Temperature_c) AS stddev_sample
+FROM `project-leducthinh-2024.DA04_K300.weather_new`
+WHERE Temperature_c IS NOT NULL
+
+-- KẾT QUẢ:
+--   "mean": "11.857207777758891",
+--   "stddev_sample": "9.5122435458608159"
+
+
+
+-- TÓM LẠI:
+-- 1. "mean": "11.857207777758891",
+-- 2. "stddev_sample": "9.5122435458608159"
+-- 3. mae 2.812 NHỎ HƠN 1 độ lệch chuẩn stddev
+-- >>> SUY RA >>> CÓ THỂ DÙNG MODEL NÀY DỰ ĐOÁN
+
+
+
+-- PREDICT
+-- y = b1.x1 + b2.x2 + ... + a
+-- y = b1.Humidity + b2.Wind_Speed_kmh + b3.Wind_Bearing_degrees 
+SELECT *
+FROM ML.PREDICT(MODEL `project-leducthinh-2024.DA04_K300.weather_linear_model`, (  
+  SELECT 
+  0.79 as Humidity,
+  14.3 as Wind_Speed_kmh,
+  131 as Wind_Bearing_degrees,
+  10.3 as Visibility_km,
+  1010.15 as Pressure_millibars,
+  1 as Rain,
+  'Normal' as Description)
+)
+
+
+-- IN RA b1,b2,b3
+SELECT *
+FROM ML.WEIGHTS(MODEL `project-leducthinh-2024.DA04_K300.weather_linear_model`) 
+
+
