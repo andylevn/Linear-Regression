@@ -1,0 +1,128 @@
+SELECT COUNT(*) FROM `project-leducthinh-2024.DA04_K300.obesity` 
+-- 497. Đã clean 3 duplicated rows
+
+SELECT * FROM `project-leducthinh-2024.DA04_K300.obesity` LIMIT 2
+  -- "height": "1.41",
+  -- "weight": "35",
+  -- "bmi": "17.6",
+  -- "age": "72",
+  -- "gender_M": "0".  1:Nam,  0:Nữ.
+
+
+-- Count dưới 500 >>> chia dữ liệu thành 80% dùng để train và 20% để test
+CREATE OR REPLACE TABLE `project-leducthinh-2024.DA04_K300.obesity_split` 
+AS
+SELECT * ,
+  CASE
+    WHEN split_field <= 0.8 THEN 'training' -- 80% dành cho training
+    WHEN split_field > 0.8 THEN 'evaluation' -- 20% dành cho evaluation
+  END AS split_dataframe
+FROM (
+  SELECT *, ROUND(ABS(RAND()), 3) AS split_field
+  FROM `project-leducthinh-2024.DA04_K300.obesity`
+);
+
+
+
+-- Xem bảng 80-20 mới tạo
+SELECT * FROM  `project-leducthinh-2024.DA04_K300.obesity_split` 
+  -- "height": "1.41",
+  -- "weight": "35",
+  -- "bmi": "17.6",
+  -- "age": "72",
+  -- "gender_M": "0",
+  -- "split_field": "0.7",
+  -- "split_dataframe": "training"
+
+-- B1: XÂY MODEL
+CREATE OR REPLACE MODEL `project-leducthinh-2024.DA04_K300.obesity_by_height_linear_model`
+OPTIONS(MODEL_TYPE = 'LINEAR_REG',
+        INPUT_LABEL_COLS = ['height']) -- Cột target là height
+AS
+SELECT 
+    height, 
+    weight,
+    bmi,
+    age,
+    gender_M
+FROM `project-leducthinh-2024.DA04_K300.obesity_split`
+WHERE split_dataframe = 'training' -- Dữ liệu training
+  AND height IS NOT NULL
+  AND weight > 0
+  AND bmi > 0
+  AND age > 0;
+
+
+-- KQ SAU KHI CREATE MODEL: 
+
+-- Mean Absolute Error (MAE): 0.0088. >>> Sai số tuyệt đối trung bình ~0.0088 mét (~8.8mm) khá nhỏ >>> mô hình dự đoán chính xác.
+-- Mean Squared Error (MSE): 0.0002. >>> Sai số bình phương trung bình thấp, phù hợp với MAE >>> các dự đoán không có chênh lệch lớn.
+-- Mean Squared Log Error (MSLE): 0 >>> Không có sự khác biệt tỷ lệ log giữa giá trị thực và dự đoán và không có outliers đáng kể.
+-- Median Absolute Error: 0.0055. >>> Sai số tuyệt đối trung vị thấp hơn MAE (5.5mm so với 8.8mm) >>> phần lớn dự đoán có sai số nhỏ hơn mức trung bình.
+-- R Squared (R²): 0.9776. >>> Giá trị R² gần 1 (0.9776) >>> kết quả tốt.
+
+
+-- Kết luận:
+-- Mô hình hoạt động rất tốt với các chỉ số sai số thấp và giá trị R² cao.
+-- Dữ liệu có mối quan hệ tuyến tính rõ ràng giữa các biến đầu vào (weight, bmi, age, gender_M) và biến target(height).
+
+
+-- B2: EVALUATE
+SELECT *
+FROM ML.EVALUATE(MODEL `project-leducthinh-2024.DA04_K300.obesity_by_height_linear_model`,
+
+(SELECT * EXCEPT(split_dataframe, split_field) 
+ FROM `project-leducthinh-2024.DA04_K300.obesity_split`
+ WHERE height IS NOT NULL
+   AND split_dataframe LIKE 'evaluation') -- dữ liệu evaluation (20%)
+);
+
+
+-- KQ SAU KHI EVALUATE:
+
+-- Mean Absolute Error (MAE): 0.0079 (~7.9mm). >>> Sai số trung bình giữa giá trị dự đoán và giá trị thực tế nhỏ (~7.9mm) >>> dự đoán chính xác.
+-- Mean Squared Error (MSE): 0.00011. >>> Sai số bình phương trung bình thấp >>> dự đoán có độ chính xác cao.
+-- Mean Squared Log Error (MSLE): 1.76e-05. >>> Chỉ số nhỏ gần bằng 0 >>> dự đoán không có outliers.
+-- Median Absolute Error (MedAE): 0.0066 (~6.6mm). >>> Sai số trung vị thấp hơn MAE >>> phần lớn dự đoán có sai số nhỏ.
+-- R² Score: 0.9822. >>> R² gần 1 >>> kết quả rất tốt.
+
+
+-- Kết luận:
+-- Mô hình hoạt động rất tốt
+-- Sự đồng nhất giữa tập train và tập evaluation: Các chỉ số MAE, MSE, và R² trên tập evaluation tương đương với tập train >>> mô hình không bị overfitting.
+
+
+
+
+-- Tính trung bình và độ lệch chuẩn cho height:
+SELECT 
+  AVG(height) AS mean_height,
+  STDDEV(height) AS stddev_sample_height
+FROM `project-leducthinh-2024.DA04_K300.obesity_split`
+WHERE height IS NOT NULL;
+
+
+-- Mean (mean_height): 1.5905
+-- Độ lệch chuẩn mẫu (stddev_sample_height): 0.0877
+-- Mean Absolute Error (MAE): 0.0079
+
+
+-- MAE (0.0079) < stddev (0.0877) >>>  MAE nhỏ hơn 1 độ lệch chuẩn. >>> Mô hình có thể sử dụng để dự đoán chiều cao.
+
+
+-- B3: PREDICT
+-- y = b1.x1 + b2.x2 + ... + a
+SELECT * 
+FROM ML.PREDICT(MODEL `project-leducthinh-2024.DA04_K300.obesity_by_height_linear_model`, (
+  SELECT 
+  58 AS weight, 
+  23.2 AS bmi, 
+  30 AS age, 
+  1 AS gender_M --(1: Nam, 0: Nữ)
+));
+
+-- KQ từ predict:
+
+-- Dự đoán chiều cao 1.5852 m đúng khớp với kỳ vọng dựa trên thông tin input.
+-- R² ≈ 0.98 và các chỉ số sai số nhỏ từ evaluation cho thấy mô hình có độ tin cậy cao.
+-- Mean Absolute Error (MAE) trên tập evaluation là 0.0079 (~7.9 mm). >>> nhỏ hơn nhiều so với độ lệch chuẩn của dữ liệu chiều cao (0.0877). >>> Mô hình không chỉ chính xác mà còn ổn định, không bị overfitting.
